@@ -147,7 +147,7 @@ class WeatherPlugin(Star):
         else:
             text = format_weather_info(data[0])
             # 使用 LLM 润色结果
-            enhanced_text = await use_LLM(text)
+            enhanced_text = await use_LLM(text, self.config)
             print(data)
             yield event.plain_result(enhanced_text)
 
