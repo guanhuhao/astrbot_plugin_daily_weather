@@ -208,22 +208,3 @@ class WeatherPlugin(Star):
             logger.error(f"get_current_weather_by_city error: {e}")
             logger.error(traceback.format_exc())
             return None
-
-
-# if __name__ == "__main__":
-#     import asyncio
-    
-#     async def main():
-#         config = {
-#             "LLM_api_key": "sk-Ys7zwsmdci4mRcpJfN49rX1COJfqNc6sM8MeXHUwq77b7SUh",
-#             "LLM_url": "https://api.gueai.com/v1/chat/completions",
-#             "LLM_model": "claude-3-7-sonnet-20250219-thinking",
-#             "LLM_prompt": ""
-#         }
-#         test_text = "杭州 2024-03-19 周二 天气预报：白天晴，气温25°C ~ 15°C, 东风3级；夜间多云，西风2级。"
-#         result = await use_LLM(test_text, config=config)
-#         print("原始文本:", test_text)
-#         print("润色后文本:", result)
-
-#     # 运行异步主函数
-#     asyncio.run(main())
