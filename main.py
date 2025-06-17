@@ -45,8 +45,8 @@ async def use_LLM(result: str , config: dict) -> str:
     try:
         # 初始化 OpenAI 客户端
         client = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY", config["openai_api_key"]),
-            base_url=os.getenv("OPENAI_API_BASE", config["url"])  # 可以设置为其他兼容的API端点
+            api_key=os.getenv("OPENAI_API_KEY", config["LLM_api_key"]),
+            base_url=os.getenv("OPENAI_API_BASE", config["LLM_url"])  # 可以设置为其他兼容的API端点
         )
 
         # 构建 prompt
@@ -67,7 +67,7 @@ async def use_LLM(result: str , config: dict) -> str:
 
         # 调用 API
         response = await client.chat.completions.create(
-            model=config["model"],  # 或其他兼容的模型
+            model=config["LLM_model"],  # 或其他兼容的模型
             messages=[
                 {"role": "system", "content": "你是一个专业的天气预报员，善于用生动有趣的语言描述天气。"},
                 {"role": "user", "content": prompt}
