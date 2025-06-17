@@ -3,6 +3,7 @@ import aiohttp
 import datetime
 from typing import Optional, List, Dict
 import traceback
+import re
 
 from astrbot.api.all import (
     Star, Context, register,
