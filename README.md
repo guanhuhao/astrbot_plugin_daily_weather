@@ -1,9 +1,59 @@
-# helloworld
+# 高德天气查询插件
 
-AstrBot 插件模板
+一个基于高德开放平台 API 的天气查询插件，支持查询当前天气和未来天气预报。
 
-A template plugin for AstrBot plugin feature
+## 功能特点
 
-# 支持
+- 支持查询当前天气状况
+- 支持查询未来天气预报
+- 支持文本和图片两种展示模式
+- 支持自定义默认城市
 
-[帮助文档](https://astrbot.app)
+## 配置说明
+
+在 `_conf_schema.json` 中配置以下参数：
+
+```json
+{
+    "amap_api_key": "你的高德API密钥",
+    "default_city": "北京",
+    "send_mode": "image"  // 可选 "image" 或 "text"
+}
+```
+
+## 使用方法
+
+### 命令格式
+
+```
+/weather <子命令> [城市名]
+```
+
+### 支持的子命令
+
+- `current`: 查询当前天气
+  - 示例：`/weather current 苏州`
+- `forecast`: 查询天气预报
+  - 示例：`/weather forecast 北京`
+- `help`: 显示帮助信息
+
+### 天气信息展示格式
+
+文本模式下的展示格式：
+```
+[日期]周[星期] 天气预报：
+白天[天气]，气温[高温]°C ~ [低温]°C, [风向]风[风力]级；
+夜间[天气]，[风向]风[风力]级。
+```
+
+## 依赖要求
+
+- Python 3.7+
+- aiohttp
+- AstrBot 框架
+
+## 作者信息
+
+- 作者：鸽吾安
+- 版本：1.0.0
+- 项目地址：
