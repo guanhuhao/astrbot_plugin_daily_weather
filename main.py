@@ -50,7 +50,7 @@ async def use_LLM(result: str , config: dict) -> str:
         )
 
         # 构建 prompt
-        if config["prompt"] is "":
+        if config["LLM_prompt"] is "":
           prompt = f"""
           请将以下天气预报信息改写得更加自然、生动，但保持信息准确性：
           
