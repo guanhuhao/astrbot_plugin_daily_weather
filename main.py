@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 import aiohttp
-import os
-from typing import Optional
 import traceback
 import re
-from openai import AsyncOpenAI
 
 from astrbot.api.all import (
     Star, Context, register,
@@ -13,15 +10,12 @@ from astrbot.api.all import (
 from astrbot.api.event import filter
 from astrbot.api import logger
 
-def use_LLM(result):
-  return result
-
-def format_weather_info(weather_dict):
+def format_weather_info(city, weather_dict):
   """
   使用正则表达式模板构造天气描述
   """
   # 定义天气描述模板
-  template = r"{date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
+  template = r"{city} {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
   
   # 使用正则表达式替换占位符
   pattern = r'\{(\w+)\}'
@@ -34,56 +28,87 @@ def format_weather_info(weather_dict):
 
   return result
 
-async def use_LLM(result: str , config: dict) -> str:
+async def use_LLM(result: str, config: dict) -> str:
     """
     使用 LLM 服务来润色天气预报结果
     Args:
         result: 原始天气预报文本
+        config: LLM配置信息
     Returns:
         str: 润色后的天气预报文本
     """
     try:
-        # 初始化 OpenAI 客户端
-        client = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY", config["LLM_api_key"]),
-            base_url=os.getenv("OPENAI_API_BASE", config["LLM_url"])  # 可以设置为其他兼容的API端点
-        )
-
         # 构建 prompt
-        if config["LLM_prompt"] is "":
-          prompt = f"""
-          请将以下天气预报信息改写得更加自然、生动，但保持信息准确性：
-          
-          原文：
-          {result}
-          
-          要求：
-          1. 使用更生动的语言
-          2. 可以添加适当的表情符号
-          3. 可以根据天气增加合适的建议
-          4. 保持所有数据的准确性
-          5. 控制在200字以内
-          """
+        prompt = f"""
+        请将以下天气预报信息，但保持信息准确性：
+        
+        原文：
+        {result}
+        
+        要求：
+        1. 天气现象描述要专业,使用适当emoji
+        2. 可以根据天气提供小提示（列点），要让人感觉到很贴心温暖
+        3. 保持所有数据的准确性
+        4. 控制在150字以内
+        5. 语气要以可爱的女生语气，给人带来活力满满的能量，但不要太做作
 
-        # 调用 API
-        response = await client.chat.completions.create(
-            model=config["LLM_model"],  # 或其他兼容的模型
-            messages=[
-                {"role": "system", "content": "你是一个专业的天气预报员，善于用生动有趣的语言描述天气。"},
+        例子：
+        2024-03-19 周二 天气小播报（杭州）
+        大家早安哦~ 今天白天是超美的晴天☀️呢！气温在25°C~15°C之间波动，晚上转为多云，今天风蛮大的，早上东南风3级，晚上西北风2级，记得多穿件外套哦~
+        
+        小贴士：
+        - 今天温差有点大，记得带件外套呀~
+        - 白天阳光超好，防晒霜别忘记涂哦！
+        - 晚上多云很舒服，适合和朋友出去走走
+        
+        这么好的天气，心情都会变得超棒的！记得好好享受这个美丽的春日～
+        
+        """
+
+        # 构建请求数据
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {config['LLM_api_key']}"
+        }
+        
+        payload = {
+            "model": config["LLM_model"],
+            "messages": [
+                {"role": "system", "content": "你是一个专业的天气预报员。"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=200
-        )
+            "temperature": 0.7,
+            "max_tokens": 200
+        }
 
-        # 获取结果
-        enhanced_result = response.choices[0].message.content.strip()
-        return enhanced_result
+        # 使用 aiohttp 直接调用 API
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                config["LLM_url"],
+                headers=headers,
+                json=payload,
+                timeout=30
+            ) as response:
+                if response.status == 200:
+                    response_data = await response.json()
+                    print("API Response:", response_data)  # 添加调试信息
+                    # 根据实际返回格式调整获取结果的方式
+                    try:
+                        enhanced_result = response_data['choices'][0]['message']['content'].strip()
+                        return enhanced_result
+                    except (KeyError, IndexError) as e:
+                        print(f"Response parsing error: {e}")
+                        return result
+                else:
+                    print(f"API request failed with status {response.status}")
+                    response_text = await response.text()
+                    print(f"Error response: {response_text}")
+                    return result
 
     except Exception as e:
-        logger.error(f"LLM enhancement failed: {e}")
-        logger.error(traceback.format_exc())
-        return result  # 如果失败则返回原始结果
+        print(f"LLM enhancement failed: {e}")
+        print(traceback.format_exc())
+        return result
 
 @register(
     "daily_weather",
@@ -145,7 +170,7 @@ class WeatherPlugin(Star):
             result_img_url = await self.render_current_weather(data)
             yield event.image_result(result_img_url)
         else:
-            text = format_weather_info(data[0])
+            text = format_weather_info(city, data[0])
             # 使用 LLM 润色结果
             enhanced_text = await use_LLM(text, self.config)
             print(data)
@@ -187,61 +212,19 @@ class WeatherPlugin(Star):
 
 
 # if __name__ == "__main__":
-#     import re
-#     def format_weather_info(weather_dict):
-#       """
-#       使用正则表达式模板构造天气描述
-#       """
-#       # 定义天气描述模板
-#       template = r"{date}周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}，{nightwind}风{nightpower}级。"
-      
-#       # 使用正则表达式替换占位符
-#       pattern = r'\{(\w+)\}'
-      
-#       def replace_func(match):
-#           key = match.group(1)
-#           return str(weather_dict.get(key, f'{{{key}}}'))
-      
-#       result = re.sub(pattern, replace_func, template)
-#       return result
-
-#     async def get_current_weather_by_city(city: str) -> Optional[list]:
-#         """
-#         调用高德开放平台API，返回城市当前实况
-#         """
-#         # logger.debug(f"get_current_weather_by_city city={city}")
-#         url = "https://restapi.amap.com/v3/weather/weatherInfo"
-#         params = {
-#             "key": "05e0e64017d1466e2f0bb654688553f6",
-#             "city": city,
-#             "extensions": "all"
-#         }
-#         # logger.debug(f"Requesting: {url}, params={params}")
-#         try:
-#             async with aiohttp.ClientSession() as session:
-#                 async with session.get(url, params=params, timeout=10) as resp:
-#                     # logger.debug(f"Response status: {resp.status}")
-#                     if resp.status == 200:
-#                         data = await resp.json()
-#                         # print(data)
-#                         weather_list = []
-#                         for daily_weather in data['forecasts'][0]['casts']:
-#                               weather_list.append(daily_weather)
-
-#                         return weather_list
-#                     else:
-#                         # logger.error(f"get_current_weather_by_city status={resp.status}")
-#                         return None
-#         except Exception as e:
-#             # logger.error(f"get_current_weather_by_city error: {e}")
-#             # logger.error(traceback.format_exc())
-#             return None
-
-#     # 创建事件循环来运行异步函数
 #     import asyncio
+    
 #     async def main():
-#         result = await get_current_weather_by_city("苏州")
-#         print(result)
+#         config = {
+#             "LLM_api_key": "sk-Ys7zwsmdci4mRcpJfN49rX1COJfqNc6sM8MeXHUwq77b7SUh",
+#             "LLM_url": "https://api.gueai.com/v1/chat/completions",
+#             "LLM_model": "claude-3-7-sonnet-20250219-thinking",
+#             "LLM_prompt": ""
+#         }
+#         test_text = "杭州 2024-03-19 周二 天气预报：白天晴，气温25°C ~ 15°C, 东风3级；夜间多云，西风2级。"
+#         result = await use_LLM(test_text, config=config)
+#         print("原始文本:", test_text)
+#         print("润色后文本:", result)
 
 #     # 运行异步主函数
 #     asyncio.run(main())
