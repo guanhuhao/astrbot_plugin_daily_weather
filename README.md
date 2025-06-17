@@ -9,6 +9,16 @@
 - 支持文本和图片两种展示模式
 - 支持自定义默认城市
 
+## 安装说明
+
+1. 安装依赖包：
+```bash
+pip install -r requirements.txt
+```
+
+2. 确保你的 Python 环境中有以下模块：
+- re (Python 内置模块，用于正则表达式处理)
+
 ## 配置说明
 
 在 `_conf_schema.json` 中配置以下参数：
@@ -49,7 +59,8 @@
 ## 依赖要求
 
 - Python 3.7+
-- aiohttp
+- aiohttp (外部依赖，用于HTTP请求)
+- re (Python内置模块，用于正则表达式)
 - AstrBot 框架
 
 ## 作者信息
