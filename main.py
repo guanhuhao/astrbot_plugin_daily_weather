@@ -9,12 +9,12 @@ from astrbot.api.all import (
 from astrbot.api.event import filter
 from astrbot.api import logger
 from typing import Optional
-def format_weather_info(city, weather_dict):
+def format_weather_info(city: str, weather_dict):
   """
   使用正则表达式模板构造天气描述
   """
   # 定义天气描述模板
-  template = r"{city} {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
+  template = city + r" {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
   
   # 使用正则表达式替换占位符
   pattern = r'\{(\w+)\}'
@@ -147,7 +147,7 @@ class WeatherPlugin(Star):
         pass
 
     @weather_group.command("current")
-    async def weather_current(self, event: AstrMessageEvent, city: Optional[str] = "苏州"):
+    async def weather_current(self, event: AstrMessageEvent, city: Optional[str] = ""):
         """
         查看当前实况天气
         用法: /weather current <城市>
