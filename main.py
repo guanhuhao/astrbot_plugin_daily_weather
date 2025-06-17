@@ -8,7 +8,7 @@ from astrbot.api.all import (
 )
 from astrbot.api.event import filter
 from astrbot.api import logger
-
+from typing import Optional
 def format_weather_info(city, weather_dict):
   """
   使用正则表达式模板构造天气描述
