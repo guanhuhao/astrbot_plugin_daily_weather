@@ -1,181 +1,27 @@
 # -*- coding: utf-8 -*-
 import aiohttp
-import datetime
-from typing import Optional, List, Dict
+import os
+from typing import Optional
 import traceback
 import re
+from openai import AsyncOpenAI
 
 from astrbot.api.all import (
     Star, Context, register,
-    AstrMessageEvent, command_group, command,
-    MessageEventResult, llm_tool
+    AstrMessageEvent, command_group, 
 )
 from astrbot.api.event import filter
 from astrbot.api import logger
 
-# ==============================
-# 1) HTML 模板
-# ==============================
-
-CURRENT_WEATHER_TEMPLATE = """
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 1280px; /* 确保匹配 render 预设的图片尺寸 */
-      height: 720px;
-      background-color: #fff;
-    }
-    .weather-container {
-      width: 100%;
-      height: 100%;
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center; /* 垂直居中 */
-      align-items: center; /* 水平居中 */
-      background-color: #ffffff;
-      color: #333;
-      font-family: sans-serif;
-      font-size: 30px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-    }
-    .weather-container h2 {
-      margin-top: 0;
-      color: #4e6ef2;
-      text-align: center;
-      font-size: 40px;
-    }
-    .weather-info {
-      margin-bottom: 10px;
-    }
-    .source-info {
-      border-top: 1px solid #ddd;
-      margin-top: 12px;
-      padding-top: 12px;
-      font-size: 16px;
-      color: #999;
-    }
-  </style>
-</head>
-<body>
-  <div class="weather-container">
-    <h2>当前天气</h2>
-    
-    <div class="weather-info">
-      <strong>城市:</strong> {{ city }}
-    </div>
-    <div class="weather-info">
-      <strong>天气:</strong> {{ desc }}
-    </div>
-    <div class="weather-info">
-      <strong>温度:</strong> {{ temp }}℃ (体感: {{ feels_like }}℃)
-    </div>
-    <div class="weather-info">
-      <strong>湿度:</strong> {{ humidity }}%
-    </div>
-    <div class="weather-info">
-      <strong>风速:</strong> {{ wind_speed }} km/h
-    </div>
-    
-    <div class="source-info">
-      数据来源: 心知天气（Seniverse） 免费API
-    </div>
-  </div>
-</body>
-</html>
-"""
-
-FORECAST_TEMPLATE = """
-<html>
-<head>
-  <meta charset="UTF-8"/>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 1280px;
-      height: 720px;
-      background-color: #fff;
-    }
-    .forecast-container {
-      width: 100%;
-      height: 100%;
-      padding: 8px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      background-color: #fff;
-      color: #333;
-      font-family: sans-serif;
-      font-size: 30px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-    }
-    .forecast-container h2 {
-      margin-top: 0;
-      color: #4e6ef2;
-      text-align: center;
-      font-size: 40px;
-    }
-    .city-info {
-      margin-bottom: 8px;
-    }
-    .day-item {
-      margin-bottom: 8px;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 4px;
-    }
-    .day-title {
-      font-weight: bold;
-      color: #4e6ef2;
-      margin-bottom: 4px;
-    }
-    .source-info {
-      font-size: 16px;
-      color: #999;
-      margin-top: 12px;
-      border-top: 1px solid #ddd;
-      padding-top: 8px;
-    }
-  </style>
-</head>
-<body>
-  <div class="forecast-container">
-    <h2>未来{{ total_days }}天天气预报</h2>
-    <div class="city-info">
-      <strong>城市:</strong> {{ city }}
-    </div>
-
-    {% for day in days %}
-    <div class="day-item">
-      <div class="day-title">{{ day.date }}</div>
-      <div><strong>白天:</strong> {{ day.text_day }} — {{ day.high }}℃</div>
-      <div><strong>夜晚:</strong> {{ day.text_night }} — {{ day.low }}℃</div>
-      <div><strong>湿度:</strong> {{ day.humidity }}%  <strong>风速:</strong> {{ day.wind_speed }} km/h</div>
-    </div>
-    {% endfor %}
-
-    <div class="source-info">
-      数据来源: 高德开放平台（Amap） 免费API
-    </div>
-  </div>
-</body>
-</html>
-"""
-
+def use_LLM(result):
+  return result
 
 def format_weather_info(weather_dict):
   """
   使用正则表达式模板构造天气描述
   """
   # 定义天气描述模板
-  template = r"{date}周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}，{nightwind}风{nightpower}级。"
+  template = r"{date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
   
   # 使用正则表达式替换占位符
   pattern = r'\{(\w+)\}'
@@ -185,7 +31,59 @@ def format_weather_info(weather_dict):
       return str(weather_dict.get(key, f'{{{key}}}'))
   
   result = re.sub(pattern, replace_func, template)
+
   return result
+
+async def use_LLM(result: str , config: dict) -> str:
+    """
+    使用 LLM 服务来润色天气预报结果
+    Args:
+        result: 原始天气预报文本
+    Returns:
+        str: 润色后的天气预报文本
+    """
+    try:
+        # 初始化 OpenAI 客户端
+        client = AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY", config["openai_api_key"]),
+            base_url=os.getenv("OPENAI_API_BASE", config["url"])  # 可以设置为其他兼容的API端点
+        )
+
+        # 构建 prompt
+        if config["prompt"] is "":
+          prompt = f"""
+          请将以下天气预报信息改写得更加自然、生动，但保持信息准确性：
+          
+          原文：
+          {result}
+          
+          要求：
+          1. 使用更生动的语言
+          2. 可以添加适当的表情符号
+          3. 可以根据天气增加合适的建议
+          4. 保持所有数据的准确性
+          5. 控制在200字以内
+          """
+
+        # 调用 API
+        response = await client.chat.completions.create(
+            model=config["model"],  # 或其他兼容的模型
+            messages=[
+                {"role": "system", "content": "你是一个专业的天气预报员，善于用生动有趣的语言描述天气。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=200
+        )
+
+        # 获取结果
+        enhanced_result = response.choices[0].message.content.strip()
+        return enhanced_result
+
+    except Exception as e:
+        logger.error(f"LLM enhancement failed: {e}")
+        logger.error(traceback.format_exc())
+        return result  # 如果失败则返回原始结果
 
 @register(
     "daily_weather",
@@ -241,14 +139,17 @@ class WeatherPlugin(Star):
         if data is None:
             yield event.plain_result(f"查询 [{city}] 的当前天气失败，请稍后再试。")
             return
+        
         # 根据配置决定发送模式
         if self.send_mode == "image":
             result_img_url = await self.render_current_weather(data)
             yield event.image_result(result_img_url)
         else:
             text = format_weather_info(data[0])
+            # 使用 LLM 润色结果
+            enhanced_text = await use_LLM(text)
             print(data)
-            yield event.plain_result(text)
+            yield event.plain_result(enhanced_text)
 
     # =============================
     # 核心逻辑
