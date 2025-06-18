@@ -4,10 +4,12 @@ import re
 
 from astrbot.api.all import (
     Star, Context, register,
-    AstrMessageEvent, command_group, 
+    AstrMessageEvent, command_group,  MessageEventResult
 )
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from astrbot.api.event import filter
-from astrbot.api import logger
+from astrbot.api import logger, llm_tool
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from typing import Optional
 def format_weather_info(city: str, weather_dict):
   """

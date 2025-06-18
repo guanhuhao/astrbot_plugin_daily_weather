@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../AstrBot/data/plugins/astrbot_plugin_daily_weather"
+		}
+	],
+	"settings": {}
+}
