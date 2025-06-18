@@ -133,6 +133,67 @@ class WeatherPlugin(Star):
         self.send_mode = config.get("send_mode", "image")
         logger.debug(f"WeatherPlugin initialized with API key: {self.api_key}, default_city: {self.default_city}, send_mode: {self.send_mode}")
 
+        # subscribe init
+        self.timezone = self.context.get_config().get("timezone")
+        if not self.timezone:
+            self.timezone = None
+        try:
+            self.timezone = zoneinfo.ZoneInfo(self.timezone) if self.timezone else None
+        except Exception as e:
+            logger.error(f"时区设置错误: {e}, 使用本地时区")
+            self.timezone = None
+        self.scheduler = AsyncIOScheduler(timezone=self.timezone)
+        subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
+        if not os.path.exists(subscribe_file):
+            with open(subscribe_file, "w", encoding="utf-8") as f:
+                f.write("{}")
+        with open(subscribe_file, "r", encoding="utf-8") as f:
+            self.subscribe_data = json.load(f)
+
+        self._init_scheduler()
+        self.scheduler.start()
+
+    def _init_scheduler(self):
+        """Initialize the scheduler."""
+        for group in self.subscribe_data:
+            for subscribe in self.subscribe_data[group]:
+                if "id" not in subscribe:
+                    id_ = str(uuid.uuid4())
+                    subscribe["id"] = id_
+                else:
+                    id_ = subscribe["id"]
+                if "datetime" in subscribe:
+                    if self.check_is_outdated(subscribe):
+                        continue
+                    self.scheduler.add_job(
+                        self._reminder_callback,
+                        id=id_,
+                        trigger="date",
+                        args=[group, subscribe],
+                        run_date=datetime.datetime.strptime(
+                            reminder["datetime"], "%Y-%m-%d %H:%M"
+                        ),
+                        misfire_grace_time=60,
+                    )
+                else "cron" in subscribe:
+                    self.scheduler.add_job(
+                        self._reminder_callback,
+                        trigger="cron",
+                        id=id_,
+                        args=[group, subscribe],
+                        misfire_grace_time=60,
+                        **self._parse_cron_expr(subscribe["cron"]),
+                    )
+                    
+    def check_is_outdated(self, reminder: dict):
+        """Check if the reminder is outdated."""
+        if "datetime" in reminder:
+            reminder_time = datetime.datetime.strptime(
+                reminder["datetime"], "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=self.timezone)
+            return reminder_time < datetime.datetime.now(self.timezone)
+        return False
+
     # =============================
     # 命令组 "weather"
     # =============================
@@ -174,6 +235,14 @@ class WeatherPlugin(Star):
             enhanced_text = await use_LLM(text, self.config)
             yield event.plain_result(enhanced_text)
 
+
+    @weather_group.command("subscribe")
+    async def weather_subscribe(self, event: AstrMessageEvent, city: Optional[str] = ""):
+        """
+        订阅天气预报
+        用法: /weather subscribe <城市>
+        示例: /weather subscribe 北京
+        """
     # =============================
     # 核心逻辑
     # =============================
