@@ -35,6 +35,7 @@ def format_weather_info(city: str, weather_dict):
 
   return result
 
+
 async def use_LLM(result: str, config: dict) -> str:
     """
     使用 LLM 服务来润色天气预报结果
@@ -142,24 +143,37 @@ class WeatherPlugin(Star):
         logger.debug(f"WeatherPlugin initialized with API key: {self.api_key}, default_city: {self.default_city}, send_mode: {self.send_mode}")
 
         # subscribe init
-        # self.timezone = self.context.get_config().get("timezone")
-        # if not self.timezone:
-        #     self.timezone = None
-        # try:
-        #     self.timezone = zoneinfo.ZoneInfo(self.timezone) if self.timezone else None
-        # except Exception as e:
-        #     logger.error(f"时区设置错误: {e}, 使用本地时区")
-        #     self.timezone = None
-        # self.scheduler = AsyncIOScheduler(timezone=self.timezone)
-        # subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
-        # if not os.path.exists(subscribe_file):
-        #     with open(subscribe_file, "w", encoding="utf-8") as f:
-        #         f.write("{}")
-        # with open(subscribe_file, "r", encoding="utf-8") as f:
-        #     self.subscribe_data = json.load(f)
+        self.timezone = self.context.get_config().get("timezone")
+        if not self.timezone:
+            self.timezone = None
+        try:
+            self.timezone = zoneinfo.ZoneInfo(self.timezone) if self.timezone else None
+        except Exception as e:
+            logger.error(f"时区设置错误: {e}, 使用本地时区")
+            self.timezone = None
+        self.scheduler = AsyncIOScheduler(timezone=self.timezone)
+        subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
+        if not os.path.exists(subscribe_file):
+            with open(subscribe_file, "w", encoding="utf-8") as f:
+                f.write("{}")
+        with open(subscribe_file, "r", encoding="utf-8") as f:
+            self.subscribe_data = json.load(f)
 
-        # self._init_scheduler()
-        # self.scheduler.start()
+        self._init_scheduler()
+        self.scheduler.start()
+        for job in self.scheduler.get_jobs():
+            try:
+                next_time = job.trigger.get_next_fire_time(None, dt.now())
+                logger.info(f"任务 {job.id} 下次执行: {next_time}")
+                
+                if next_time:
+                    import time
+                    seconds_until = (next_time - dt.now()).total_seconds()
+                    logger.info(f"距离下次执行还有: {seconds_until:.1f} 秒")
+                else:
+                    logger.warning(f"任务 {job.id} 没有下次执行时间！")
+            except Exception as e:
+                logger.error(f"检查任务 {job.id} 时间失败: {e}")
 
     def _init_scheduler(self):
         """Initialize the scheduler."""
@@ -174,33 +188,67 @@ class WeatherPlugin(Star):
                     if self.check_is_outdated(subscribe):
                         continue
                     self.scheduler.add_job(
-                        self._reminder_callback,
+                        self._subscribe_callback,
                         id=id_,
                         trigger="date",
                         args=[group, subscribe],
                         run_date=datetime.datetime.strptime(
-                            reminder["datetime"], "%Y-%m-%d %H:%M"
+                            subscribe["datetime"], "%Y-%m-%d %H:%M"
                         ),
                         misfire_grace_time=60,
                     )
                 elif "cron" in subscribe:
                     self.scheduler.add_job(
-                        self._reminder_callback,
+                        self._subscribe_callback,
                         trigger="cron",
                         id=id_,
                         args=[group, subscribe],
                         misfire_grace_time=60,
                         **self._parse_cron_expr(subscribe["cron"]),
                     )
+                    logger.info(f"ghh: subscribe_callback {subscribe['cron']}")
+
+        logger.info("=== 调度器状态检查 ===")
+        logger.info(f"调度器运行状态: {self.scheduler.running}")
+        logger.info(f"调度器状态: {self.scheduler.state}")
+        
+        jobs = self.scheduler.get_jobs()
+        logger.info(f"总任务数: {len(jobs)}")
+        
+        for job in jobs:
+            logger.info(f"\n任务详情:")
+            logger.info(f"  ID: {job.id}")
+            logger.info(f"  函数: {job.func.__name__}")
+            
+            # 尝试不同的方式获取下次执行时间
+            try:
+                if hasattr(job, 'next_run_time'):
+                    logger.info(f"  下次执行: {job.next_run_time}")
+                elif hasattr(job, '_get_run_times'):
+                    next_times = job._get_run_times(datetime.datetime.now())
+                    logger.info(f"  下次执行: {next_times[0] if next_times else 'None'}")
+                elif hasattr(job, 'trigger'):
+                    # 直接从触发器获取下次执行时间
+                    next_time = job.trigger.get_next_fire_time(None, datetime.datetime.now())
+                    logger.info(f"  下次执行: {next_time}")
+                else:
+                    logger.info("  下次执行: 无法获取")
+            except Exception as e:
+                logger.error(f"  获取下次执行时间失败: {e}")
+            
+            logger.info(f"  触发器: {job.trigger}")
+            logger.info(f"  参数: {job.args}")
                     
-    def check_is_outdated(self, reminder: dict):
-        """Check if the reminder is outdated."""
-        if "datetime" in reminder:
-            reminder_time = datetime.datetime.strptime(
-                reminder["datetime"], "%Y-%m-%d %H:%M"
+    def check_is_outdated(self, subscribe: dict):
+        """Check if the subscript is outdated."""
+        if "datetime" in subscribe:
+            subscribe_time = datetime.datetime.strptime(
+                subscribe["datetime"], "%Y-%m-%d %H:%M"
             ).replace(tzinfo=self.timezone)
-            return reminder_time < datetime.datetime.now(self.timezone)
+            return subscribe_time < datetime.datetime.now(self.timezone)
         return False
+
+
 
     # =============================
     # 命令组 "weather"
@@ -244,13 +292,203 @@ class WeatherPlugin(Star):
             yield event.plain_result(enhanced_text)
 
 
-    @weather_group.command("subscribe")
-    async def weather_subscribe(self, event: AstrMessageEvent, city: Optional[str] = ""):
+        # =============================
+    
+    
+    # 命令组 "weather_subscript"
+    # =============================
+    @command_group("weather_subscript")
+    def weather_subscript_group(self):
+        """
+        天气相关功能命令组。
+        使用方法：
+        /weather <子指令> <城市或其它参数>
+        子指令包括：current, forecast, help
+        """
+        pass
+    @weather_subscript_group.command("sub")
+    async def weather_subscribe(self, event: AstrMessageEvent, description: str = ""):
         """
         订阅天气预报
         用法: /weather subscribe <城市>
         示例: /weather subscribe 北京
         """
+        city = "上海"
+        cron_expression = "0 9 * * *"
+        human_readable_cron = "每天9点"
+
+        if description != "":
+            city = await self.context.get_using_provider().text_chat(
+                prompt=description,
+                # func_tool_manager=func_tools_mgr,
+                # session_id=curr_cid, # 对话id。如果指定了对话id，将会记录对话到数据库
+                # contexts=context, # 列表。如果不为空，将会使用此上下文与 LLM 对话。
+                system_prompt="请分析提取出城市名称,只需要输出城市名称如 杭州",
+                image_urls=[], # 图片链接，支持路径和网络链接
+                # conversation=conversation # 如果指定了对话，将会记录对话
+            )
+            city = city.completion_text
+
+            cron_expression = await self.context.get_using_provider().text_chat(
+                prompt=description,
+                system_prompt="请分析提取出cron表达式，只需要输出cron表达式如 0 9 * * *",
+                image_urls=[], # 图片链接，支持路径和网络链接
+                # conversation=conversation # 如果指定了对话，将会记录对话
+            )
+            cron_expression = cron_expression.completion_text
+
+            human_readable_cron = await self.context.get_using_provider().text_chat(
+                prompt=city + " " + cron_expression,
+                system_prompt="将输入的地点和时间转换为人类可读的格式，方便人理解，字数限制在20个字以内",
+                image_urls=[], # 图片链接，支持路径和网络链接
+                # conversation=conversation # 如果指定了对话，将会记录对话
+            )
+            human_readable_cron = human_readable_cron.completion_text
+
+
+        logger.info(f"city={city}, cron_expression={cron_expression}, human_readable_cron={human_readable_cron}")
+
+
+        d = {
+            "text": "天气预报",
+            "cron": cron_expression,
+            "cron_h": human_readable_cron,
+            "id": str(uuid.uuid4()),
+            "city": city,
+        }
+        if event.unified_msg_origin not in self.subscribe_data:
+            self.subscribe_data[event.unified_msg_origin] = []
+        self.subscribe_data[event.unified_msg_origin].append(d)
+        self.scheduler.add_job(
+            self._subscribe_callback,
+            "cron",
+            id=d["id"],
+            misfire_grace_time=60,
+            **self._parse_cron_expr(cron_expression),
+            args=[event.unified_msg_origin, d],
+        )
+        await self._save_data()
+        yield event.plain_result(f"{human_readable_cron} 订阅成功")
+    
+    def _parse_cron_expr(self, cron_expr: str):
+        logger.info(f"cron_expr={cron_expr}")
+        fields = cron_expr.split(" ")
+        return {
+            "minute": fields[0],
+            "hour": fields[1],
+            "day": fields[2],
+            "month": fields[3],
+            "day_of_week": fields[4],
+        }
+
+    async def _subscribe_callback(self, unified_msg_origin: str, d: dict):
+        """The callback function of the subscribe."""
+        import datetime
+        
+        logger.info("🔔 订阅回调函数被触发！")
+        logger.info(f"当前时间: {datetime.datetime.now()}")
+        logger.info(f"unified_msg_origin: {unified_msg_origin}")
+        logger.info(f"d: {d}")
+
+        try:
+            city = d.get("city", "苏州")
+            data = await self.get_future_weather_by_city(city)
+            
+            if data is None:
+                logger.error(f"查询 [{city}] 的当前天气失败")
+                return
+            
+            # 根据配置决定发送模式
+            if self.send_mode == "image":
+                result_img_url = await self.render_current_weather(data)
+                # 发送图片消息
+                await self.context.send_message(
+                    unified_msg_origin,
+                    MessageEventResult().image(result_img_url)
+                )
+            else:
+                text = format_weather_info(city, data[0])
+                # 使用 LLM 润色结果
+                enhanced_text = await use_LLM(text, self.config)
+                await self.context.send_message(
+                    unified_msg_origin,
+                    MessageEventResult().message(enhanced_text)
+                )
+                
+            logger.info(f"天气订阅推送成功: {city}")
+            
+        except Exception as e:
+            logger.error(f"订阅回调执行失败: {e}", exc_info=True)
+    
+    @weather_subscript_group.command("ls")
+    async def subscribe_list(self, event: AstrMessageEvent, city: Optional[str] = ""):
+        """List upcoming subscribe."""
+        subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
+        if not subscribe:
+            yield event.plain_result("没有正在进行的订阅事项。")
+        else:
+            subscribe_str = "正在进行的订阅事项：\n"
+            for i, subscribe in enumerate(subscribe):
+                time_ = subscribe.get("datetime", "")
+                if not time_:
+                    cron_expr = subscribe.get("cron", "")
+                    time_ = subscribe.get("cron_h", "") + f"(Cron: {cron_expr})"
+                subscribe_str += f"{i + 1}. {subscribe['text']} - {time_}\n"
+            subscribe_str += "\n使用 /weather_subscript rm <id> 删除订阅事项。\n"
+            yield event.plain_result(subscribe_str)
+
+    @weather_subscript_group.command("rm")
+    async def subscribe_rm(self, event: AstrMessageEvent, index: int):
+        """Remove a subscribe by index."""
+        subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
+
+        if not subscribe:
+            yield event.plain_result("没有待办事项。")
+        elif index < 1 or index > len(subscribe):
+            yield event.plain_result("索引越界。")
+        else:
+            subscribe = subscribe.pop(index - 1)
+            job_id = subscribe.get("id")
+
+            users_subscribe = self.subscribe_data.get(event.unified_msg_origin, [])
+            for i, s in enumerate(users_subscribe):
+                if s.get("id") == job_id:
+                    users_subscribe.pop(i)
+
+            try:
+                self.scheduler.remove_job(job_id)
+            except Exception as e:
+                logger.error(f"Remove job error: {e}")
+                yield event.plain_result(
+                    f"成功移除对应的待办事项。删除定时任务失败: {str(e)} 可能需要重启 AstrBot 以取消该提醒任务。"
+                )
+            await self._save_data()
+            yield event.plain_result("成功删除待办事项：\n" + subscribe["text"])
+
+    async def get_upcoming_subscribe(self, unified_msg_origin: str):
+        """Get upcoming subscribe."""
+        subscribe = self.subscribe_data.get(unified_msg_origin, [])
+        if not subscribe:
+            return []
+        now = datetime.datetime.now(self.timezone)
+        upcoming_subscribe = [
+            subscribe
+            for subscribe in subscribe
+            if "datetime" not in subscribe
+            or datetime.datetime.strptime(
+                subscribe["datetime"], "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=self.timezone)
+            >= now
+        ]
+        return upcoming_subscribe
+
+    async def _save_data(self):
+        """Save the subscribe data."""
+        subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
+        with open(subscribe_file, "w", encoding="utf-8") as f:
+            json.dump(self.subscribe_data, f, ensure_ascii=False)
+    
+    
     # =============================
     # 核心逻辑
     # =============================
@@ -284,3 +522,8 @@ class WeatherPlugin(Star):
             logger.error(f"get_current_weather_by_city error: {e}")
             logger.error(traceback.format_exc())
             return None
+
+    async def terminate(self):
+        self.scheduler.shutdown()
+        await self._save_data()
+        logger.info("weather_subscript plugin terminated.")
