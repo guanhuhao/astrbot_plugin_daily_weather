@@ -90,23 +90,23 @@ async def use_LLM(result: str, config: dict) -> str:
             ) as response:
                 if response.status == 200:
                     response_data = await response.json()
-                    print("API Response:", response_data)  # 添加调试信息
+                    logger.debug("API Response:", response_data)  # 添加调试信息
                     # 根据实际返回格式调整获取结果的方式
                     try:
                         enhanced_result = response_data['choices'][0]['message']['content'].strip()
                         return enhanced_result
                     except (KeyError, IndexError) as e:
-                        print(f"Response parsing error: {e}")
+                        logger.error(f"Response parsing error: {e}")
                         return result
                 else:
-                    print(f"API request failed with status {response.status}")
+                    logger.error(f"API request failed with status {response.status}")
                     response_text = await response.text()
-                    print(f"Error response: {response_text}")
+                    logger.error(f"Error response: {response_text}")
                     return result
 
     except Exception as e:
-        print(f"LLM enhancement failed: {e}")
-        print(traceback.format_exc())
+        logger.error(f"LLM enhancement failed: {e}")
+        logger.error(traceback.format_exc())
         return result
 
 @register(
@@ -172,7 +172,6 @@ class WeatherPlugin(Star):
             text = format_weather_info(city, data[0])
             # 使用 LLM 润色结果
             enhanced_text = await use_LLM(text, self.config)
-            print(data)
             yield event.plain_result(enhanced_text)
 
     # =============================
