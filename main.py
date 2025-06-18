@@ -142,24 +142,24 @@ class WeatherPlugin(Star):
         logger.debug(f"WeatherPlugin initialized with API key: {self.api_key}, default_city: {self.default_city}, send_mode: {self.send_mode}")
 
         # subscribe init
-        self.timezone = self.context.get_config().get("timezone")
-        if not self.timezone:
-            self.timezone = None
-        try:
-            self.timezone = zoneinfo.ZoneInfo(self.timezone) if self.timezone else None
-        except Exception as e:
-            logger.error(f"时区设置错误: {e}, 使用本地时区")
-            self.timezone = None
-        self.scheduler = AsyncIOScheduler(timezone=self.timezone)
-        subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
-        if not os.path.exists(subscribe_file):
-            with open(subscribe_file, "w", encoding="utf-8") as f:
-                f.write("{}")
-        with open(subscribe_file, "r", encoding="utf-8") as f:
-            self.subscribe_data = json.load(f)
+        # self.timezone = self.context.get_config().get("timezone")
+        # if not self.timezone:
+        #     self.timezone = None
+        # try:
+        #     self.timezone = zoneinfo.ZoneInfo(self.timezone) if self.timezone else None
+        # except Exception as e:
+        #     logger.error(f"时区设置错误: {e}, 使用本地时区")
+        #     self.timezone = None
+        # self.scheduler = AsyncIOScheduler(timezone=self.timezone)
+        # subscribe_file = os.path.join(get_astrbot_data_path(), "astrbot-subscribe.json")
+        # if not os.path.exists(subscribe_file):
+        #     with open(subscribe_file, "w", encoding="utf-8") as f:
+        #         f.write("{}")
+        # with open(subscribe_file, "r", encoding="utf-8") as f:
+        #     self.subscribe_data = json.load(f)
 
-        self._init_scheduler()
-        self.scheduler.start()
+        # self._init_scheduler()
+        # self.scheduler.start()
 
     def _init_scheduler(self):
         """Initialize the scheduler."""
