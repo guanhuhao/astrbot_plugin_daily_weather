@@ -177,7 +177,7 @@ class WeatherPlugin(Star):
                         ),
                         misfire_grace_time=60,
                     )
-                else "cron" in subscribe:
+                elif "cron" in subscribe:
                     self.scheduler.add_job(
                         self._reminder_callback,
                         trigger="cron",
