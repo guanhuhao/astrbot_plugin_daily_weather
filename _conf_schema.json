@@ -18,23 +18,8 @@
         "default": "text",
         "hint": "选择以纯文本还是图片形式发送天气信息"
     },
-    "LLM_api_key": {
-        "description": "API Key",
-        "type": "string",
-        "hint": "请使用openai格式的api key"
-    },
-    "LLM_url": {
-        "description": "API URL",
-        "type": "string",
-        "hint": "请使用对应服务商的url,可能需要根据情况选择是否增加/v1"
-    },
-    "LLM_model": {
-        "description": "Model",
-        "type": "string",
-        "hint": "请使用对应服务商的模型"
-    },
     "LLM_prompt": {
-        "description": "Yours Prompt",
+        "description": "Yours Prompt (TODO)",
         "type": "string",
         "hint": "自定义Prompt"
     }

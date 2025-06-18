@@ -21,8 +21,11 @@ def format_weather_info(city: str, weather_dict):
   """
   使用正则表达式模板构造天气描述
   """
+  # 获取当前时间戳
+  current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  
   # 定义天气描述模板
-  template = city + r" {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
+  template = f"[{current_time}]\n" + city + r" {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
   
   # 使用正则表达式替换占位符
   pattern = r'\{(\w+)\}'
@@ -34,89 +37,6 @@ def format_weather_info(city: str, weather_dict):
   result = re.sub(pattern, replace_func, template)
 
   return result
-
-
-async def use_LLM(result: str, config: dict) -> str:
-    """
-    使用 LLM 服务来润色天气预报结果
-    Args:
-        result: 原始天气预报文本
-        config: LLM配置信息
-    Returns:
-        str: 润色后的天气预报文本
-    """
-    try:
-        # 构建 prompt
-        prompt = f"""
-        请将以下天气预报信息，但保持信息准确性：
-        
-        原文：
-        {result}
-        
-        要求：
-        1. 天气现象描述要专业,使用适当emoji
-        2. 可以根据天气提供小提示（列点），要让人感觉到很贴心温暖
-        3. 保持所有数据的准确性
-        4. 控制在150字以内
-        5. 语气要以可爱的女生语气，给人带来活力满满的能量，但不要太做作
-
-        例子：
-        2024-03-19 周二 天气小播报（杭州）
-        大家早安哦~ 今天白天是超美的晴天☀️呢！气温在25°C~15°C之间波动，晚上转为多云，今天风蛮大的，早上东南风3级，晚上西北风2级，记得多穿件外套哦~
-        
-        小贴士：
-        - 今天温差有点大，记得带件外套呀~
-        - 白天阳光超好，防晒霜别忘记涂哦！
-        - 晚上多云很舒服，适合和朋友出去走走
-        
-        这么好的天气，心情都会变得超棒的！记得好好享受这个美丽的春日～
-        
-        """
-
-        # 构建请求数据
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {config['LLM_api_key']}"
-        }
-        
-        payload = {
-            "model": config["LLM_model"],
-            "messages": [
-                {"role": "system", "content": "你是一个专业的天气预报员。"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 200
-        }
-
-        # 使用 aiohttp 直接调用 API
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                config["LLM_url"],
-                headers=headers,
-                json=payload,
-                timeout=30
-            ) as response:
-                if response.status == 200:
-                    response_data = await response.json()
-                    logger.debug("API Response:", response_data)  # 添加调试信息
-                    # 根据实际返回格式调整获取结果的方式
-                    try:
-                        enhanced_result = response_data['choices'][0]['message']['content'].strip()
-                        return enhanced_result
-                    except (KeyError, IndexError) as e:
-                        logger.error(f"Response parsing error: {e}")
-                        return result
-                else:
-                    logger.error(f"API request failed with status {response.status}")
-                    response_text = await response.text()
-                    logger.error(f"Error response: {response_text}")
-                    return result
-
-    except Exception as e:
-        logger.error(f"LLM enhancement failed: {e}")
-        logger.error(traceback.format_exc())
-        return result
 
 @register(
     "daily_weather",
@@ -161,19 +81,6 @@ class WeatherPlugin(Star):
 
         self._init_scheduler()
         self.scheduler.start()
-        for job in self.scheduler.get_jobs():
-            try:
-                next_time = job.trigger.get_next_fire_time(None, dt.now())
-                logger.info(f"任务 {job.id} 下次执行: {next_time}")
-                
-                if next_time:
-                    import time
-                    seconds_until = (next_time - dt.now()).total_seconds()
-                    logger.info(f"距离下次执行还有: {seconds_until:.1f} 秒")
-                else:
-                    logger.warning(f"任务 {job.id} 没有下次执行时间！")
-            except Exception as e:
-                logger.error(f"检查任务 {job.id} 时间失败: {e}")
 
     def _init_scheduler(self):
         """Initialize the scheduler."""
@@ -206,41 +113,9 @@ class WeatherPlugin(Star):
                         misfire_grace_time=60,
                         **self._parse_cron_expr(subscribe["cron"]),
                     )
-                    logger.info(f"ghh: subscribe_callback {subscribe['cron']}")
-
-        logger.info("=== 调度器状态检查 ===")
-        logger.info(f"调度器运行状态: {self.scheduler.running}")
-        logger.info(f"调度器状态: {self.scheduler.state}")
-        
-        jobs = self.scheduler.get_jobs()
-        logger.info(f"总任务数: {len(jobs)}")
-        
-        for job in jobs:
-            logger.info(f"\n任务详情:")
-            logger.info(f"  ID: {job.id}")
-            logger.info(f"  函数: {job.func.__name__}")
-            
-            # 尝试不同的方式获取下次执行时间
-            try:
-                if hasattr(job, 'next_run_time'):
-                    logger.info(f"  下次执行: {job.next_run_time}")
-                elif hasattr(job, '_get_run_times'):
-                    next_times = job._get_run_times(datetime.datetime.now())
-                    logger.info(f"  下次执行: {next_times[0] if next_times else 'None'}")
-                elif hasattr(job, 'trigger'):
-                    # 直接从触发器获取下次执行时间
-                    next_time = job.trigger.get_next_fire_time(None, datetime.datetime.now())
-                    logger.info(f"  下次执行: {next_time}")
-                else:
-                    logger.info("  下次执行: 无法获取")
-            except Exception as e:
-                logger.error(f"  获取下次执行时间失败: {e}")
-            
-            logger.info(f"  触发器: {job.trigger}")
-            logger.info(f"  参数: {job.args}")
                     
     def check_is_outdated(self, subscribe: dict):
-        """Check if the subscript is outdated."""
+        """Check if the subscribe is outdated."""
         if "datetime" in subscribe:
             subscribe_time = datetime.datetime.strptime(
                 subscribe["datetime"], "%Y-%m-%d %H:%M"
@@ -248,6 +123,62 @@ class WeatherPlugin(Star):
             return subscribe_time < datetime.datetime.now(self.timezone)
         return False
 
+
+    async def use_LLM(self, result: str, config: dict) -> str:
+        """
+        使用 LLM 服务来润色天气预报结果
+        Args:
+            result: 原始天气预报文本
+            config: LLM配置信息
+        Returns:
+            str: 润色后的天气预报文本
+        """
+        try:
+            # 构建 prompt
+            if len(self.config.get("LLM_prompt", "")) < 5:
+                prompt = f"""
+                {result}
+                请根据上面天气预报信息，润色天气预报文本，但保持信息准确性：
+                
+                要求：
+                1. 天气现象描述要专业,使用适当emoji
+                2. 可以根据天气提供小提示（列点），要让人感觉到很贴心温暖
+                3. 保持所有数据的准确性
+                4. 控制在150字以内
+                5. 语气要以可爱的女生语气，给人带来活力满满的能量，但不要太做作
+                6. 禁止使用** 或者 # 等markdown格式
+
+                例子：
+                2024-03-19 09:00 周二 天气小播报（杭州）
+                大家早安哦~ 今天白天是超美的晴天☀️呢！气温在25°C~15°C之间波动，晚上转为多云，今天风蛮大的，早上东南风3级，晚上西北风2级，记得多穿件外套哦~
+                
+                小贴士：
+                - 今天温差有点大，记得带件外套呀~
+                - 白天阳光超好，防晒霜别忘记涂哦！
+                - 晚上多云很舒服，适合和朋友出去走走
+                
+                这么好的天气，心情都会变得超棒的！记得好好享受这个美丽的春日～
+                
+                """
+            else:
+                prompt = result + "\n" + self.config.get("LLM_prompt", "")
+
+            result = await self.context.get_using_provider().text_chat(
+                    prompt=prompt,
+                    # func_tool_manager=func_tools_mgr,
+                    # session_id=curr_cid, # 对话id。如果指定了对话id，将会记录对话到数据库
+                    # contexts=context, # 列表。如果不为空，将会使用此上下文与 LLM 对话。
+                    system_prompt="",
+                    image_urls=[], # 图片链接，支持路径和网络链接
+                    # conversation=conversation # 如果指定了对话，将会记录对话
+                )
+            result = result.completion_text
+            return result
+
+        except Exception as e:
+            logger.error(f"LLM enhancement failed: {e}")
+            logger.error(traceback.format_exc())
+            return result
 
 
     # =============================
@@ -288,17 +219,19 @@ class WeatherPlugin(Star):
         else:
             text = format_weather_info(city, data[0])
             # 使用 LLM 润色结果
-            enhanced_text = await use_LLM(text, self.config)
+            logger.info(f"original weather text={text}")
+            enhanced_text = await self.use_LLM(text, self.config)
+            logger.info(f"LLM enhanced weather text={enhanced_text}")
             yield event.plain_result(enhanced_text)
 
 
         # =============================
     
     
-    # 命令组 "weather_subscript"
+    # 命令组 "weather_subscribe"
     # =============================
-    @command_group("weather_subscript")
-    def weather_subscript_group(self):
+    @command_group("weather_subscribe")
+    def weather_subscribe_group(self):
         """
         天气相关功能命令组。
         使用方法：
@@ -306,7 +239,7 @@ class WeatherPlugin(Star):
         子指令包括：current, forecast, help
         """
         pass
-    @weather_subscript_group.command("sub")
+    @weather_subscribe_group.command("sub")
     async def weather_subscribe(self, event: AstrMessageEvent, description: str = ""):
         """
         订阅天气预报
@@ -386,9 +319,6 @@ class WeatherPlugin(Star):
         import datetime
         
         logger.info("🔔 订阅回调函数被触发！")
-        logger.info(f"当前时间: {datetime.datetime.now()}")
-        logger.info(f"unified_msg_origin: {unified_msg_origin}")
-        logger.info(f"d: {d}")
 
         try:
             city = d.get("city", "苏州")
@@ -399,7 +329,7 @@ class WeatherPlugin(Star):
                 return
             
             # 根据配置决定发送模式
-            if self.send_mode == "image":
+            if self.send_mode == "image": # TODO
                 result_img_url = await self.render_current_weather(data)
                 # 发送图片消息
                 await self.context.send_message(
@@ -408,8 +338,10 @@ class WeatherPlugin(Star):
                 )
             else:
                 text = format_weather_info(city, data[0])
+                logger.info(f"original weather text={text}")
                 # 使用 LLM 润色结果
-                enhanced_text = await use_LLM(text, self.config)
+                enhanced_text = await self.use_LLM(text, self.config)
+                logger.info(f"LLM enhanced weather text={enhanced_text}")
                 await self.context.send_message(
                     unified_msg_origin,
                     MessageEventResult().message(enhanced_text)
@@ -420,7 +352,7 @@ class WeatherPlugin(Star):
         except Exception as e:
             logger.error(f"订阅回调执行失败: {e}", exc_info=True)
     
-    @weather_subscript_group.command("ls")
+    @weather_subscribe_group.command("ls")
     async def subscribe_list(self, event: AstrMessageEvent, city: Optional[str] = ""):
         """List upcoming subscribe."""
         subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
@@ -434,10 +366,10 @@ class WeatherPlugin(Star):
                     cron_expr = subscribe.get("cron", "")
                     time_ = subscribe.get("cron_h", "") + f"(Cron: {cron_expr})"
                 subscribe_str += f"{i + 1}. {subscribe['text']} - {time_}\n"
-            subscribe_str += "\n使用 /weather_subscript rm <id> 删除订阅事项。\n"
+            subscribe_str += "\n使用 /weather_subscribe rm <id> 删除订阅事项。\n"
             yield event.plain_result(subscribe_str)
 
-    @weather_subscript_group.command("rm")
+    @weather_subscribe_group.command("rm")
     async def subscribe_rm(self, event: AstrMessageEvent, index: int):
         """Remove a subscribe by index."""
         subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
@@ -526,4 +458,4 @@ class WeatherPlugin(Star):
     async def terminate(self):
         self.scheduler.shutdown()
         await self._save_data()
-        logger.info("weather_subscript plugin terminated.")
+        logger.info("weather_subscribe plugin terminated.")
