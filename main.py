@@ -18,25 +18,42 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from typing import Optional
 
 def format_weather_info(city: str, weather_dict):
-  """
-  使用正则表达式模板构造天气描述
-  """
-  # 获取当前时间戳
-  current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  
-  # 定义天气描述模板
-  template = f"[{current_time}]\n" + city + r" {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
-  
-  # 使用正则表达式替换占位符
-  pattern = r'\{(\w+)\}'
-  
-  def replace_func(match):
-      key = match.group(1)
-      return str(weather_dict.get(key, f'{{{key}}}'))
-  
-  result = re.sub(pattern, replace_func, template)
+    """
+    将天气数据格式化为可读的文本描述
+    
+    Args:
+        city (str): 城市名称
+        weather_dict (dict): 天气数据字典，包含以下字段：
+            - date: 日期
+            - week: 星期
+            - dayweather: 白天天气
+            - nightweather: 夜间天气
+            - daytemp: 白天温度
+            - nighttemp: 夜间温度
+            - daywind: 白天风向
+            - nightwind: 夜间风向
+            - daypower: 白天风力
+            - nightpower: 夜间风力
+    
+    Returns:
+        str: 格式化后的天气描述文本
+    """
+    # 获取当前时间戳
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 定义天气描述模板
+    template = f"[{current_time}]\n" + city + r" {date} 周{week} 天气预报：白天{dayweather}，气温{daytemp}°C ~ {nighttemp} °C, {daywind}风{daypower}级；夜间{nightweather}， {nightwind}风{nightpower}级。"
+    
+    # 使用正则表达式替换占位符
+    pattern = r'\{(\w+)\}'
+    
+    def replace_func(match):
+        key = match.group(1)
+        return str(weather_dict.get(key, f'{{{key}}}'))
+    
+    result = re.sub(pattern, replace_func, template)
 
-  return result
+    return result
 
 @register(
     "daily_weather",
@@ -47,10 +64,27 @@ def format_weather_info(city: str, weather_dict):
 )
 class WeatherPlugin(Star):
     """
-    这是一个调用高德开放平台API的天气查询插件示例。
-    支持 /weather current /weather forecast /weather help
-    - current: 查询当前实况
-    - forecast: 查询未来4天天气预报
+    基于高德开放平台API的天气查询和订阅插件。
+    
+    功能特点：
+    1. 天气查询
+       - /weather current: 查询当前实况天气
+       - /weather forecast: 查询未来4天天气预报
+       - /weather help: 查看帮助信息
+       
+    2. 天气订阅
+       - /weather_subscribe sub: 订阅定时天气推送
+       - /weather_subscribe ls: 查看当前订阅列表
+       - /weather_subscribe rm: 删除指定订阅
+       
+    3. 展示方式
+       - 支持文本和图片两种展示模式
+       - 支持通过LLM优化展示效果
+       
+    4. 配置选项
+       - 支持设置默认城市
+       - 支持自定义API密钥
+       - 支持自定义LLM提示词
     """
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -83,7 +117,15 @@ class WeatherPlugin(Star):
         self.scheduler.start()
 
     def _init_scheduler(self):
-        """Initialize the scheduler."""
+        """
+        初始化定时任务调度器，加载已保存的订阅任务
+        
+        处理两种类型的订阅：
+        1. 一次性订阅 (datetime): 检查是否过期，未过期则添加到调度器
+        2. 重复性订阅 (cron): 根据cron表达式添加定时任务
+        
+        每个订阅任务都会被分配一个唯一的UUID作为任务ID
+        """
         for group in self.subscribe_data:
             for subscribe in self.subscribe_data[group]:
                 if "id" not in subscribe:
@@ -114,8 +156,17 @@ class WeatherPlugin(Star):
                         **self._parse_cron_expr(subscribe["cron"]),
                     )
                     
-    def check_is_outdated(self, subscribe: dict):
-        """Check if the subscribe is outdated."""
+    def check_is_outdated(self, subscribe: dict) -> bool:
+        """
+        检查订阅任务是否已过期
+        
+        Args:
+            subscribe (dict): 订阅任务信息字典，包含以下可选字段：
+                - datetime: 一次性任务的执行时间，格式为 "%Y-%m-%d %H:%M"
+                
+        Returns:
+            bool: True 表示任务已过期，False 表示任务未过期或为重复性任务
+        """
         if "datetime" in subscribe:
             subscribe_time = datetime.datetime.strptime(
                 subscribe["datetime"], "%Y-%m-%d %H:%M"
@@ -184,22 +235,33 @@ class WeatherPlugin(Star):
     # =============================
     # 命令组 "weather"
     # =============================
-    @command_group("weather")
+    @command_group("weather", alias="天气查询")
     def weather_group(self):
         """
         天气相关功能命令组。
         使用方法：
         /weather <子指令> <城市或其它参数>
-        子指令包括：current, forecast, help
+        子指令包括：
+        - current: 查看当前实况天气
+        - forecast: 查询未来4天天气预报
+        - help: 查看帮助信息
         """
         pass
 
-    @weather_group.command("current")
+    @weather_group.command("current", alias="当前")
     async def weather_current(self, event: AstrMessageEvent, city: Optional[str] = ""):
         """
-        查看当前实况天气
+        查看当前实况天气，支持文本和图片两种展示模式，并可通过LLM优化输出格式
         用法: /weather current <城市>
         示例: /weather current 北京
+        
+        参数:
+        - city: 城市名称，若不指定则使用默认城市
+        
+        输出:
+        - 取决于配置的send_mode:
+          - "image": 生成图片形式的天气信息
+          - "text": 生成文本形式的天气信息（通过LLM优化展示）
         """
         logger.info(f"User called /weather current with city={city}")
         if not city:
@@ -230,21 +292,32 @@ class WeatherPlugin(Star):
     
     # 命令组 "weather_subscribe"
     # =============================
-    @command_group("weather_subscribe")
+    @command_group("weather_subscribe", alias="天气订阅")
     def weather_subscribe_group(self):
         """
-        天气相关功能命令组。
+        天气订阅相关功能命令组。
         使用方法：
-        /weather <子指令> <城市或其它参数>
-        子指令包括：current, forecast, help
+        /weather_subscribe <子指令> <参数>
+        
+        子指令包括：
+        - sub: 订阅天气预报
+        - ls: 查看当前订阅列表
+        - rm: 删除指定的订阅
         """
         pass
-    @weather_subscribe_group.command("sub")
+    @weather_subscribe_group.command("sub", alias="订阅")
     async def weather_subscribe(self, event: AstrMessageEvent, description: str = ""):
         """
-        订阅天气预报
-        用法: /weather subscribe <城市>
-        示例: /weather subscribe 北京
+        订阅天气预报服务
+        
+        Args:
+            event (AstrMessageEvent): 消息事件对象
+            description (str): 订阅描述，包含城市和时间信息，将通过LLM解析
+                             为空时使用默认值：上海，每天9点
+        
+        示例:
+            - /weather_subscribe sub 每天早上8点发送杭州天气
+            - /weather_subscribe sub 每周一三五上午9点发送北京天气
         """
         city = "上海"
         cron_expression = "0 9 * * *"
@@ -303,7 +376,24 @@ class WeatherPlugin(Star):
         await self._save_data()
         yield event.plain_result(f"{human_readable_cron} 订阅成功")
     
-    def _parse_cron_expr(self, cron_expr: str):
+    def _parse_cron_expr(self, cron_expr: str) -> dict:
+        """
+        解析cron表达式为APScheduler可用的参数字典
+        
+        Args:
+            cron_expr (str): 标准cron表达式，格式为："分 时 日 月 星期"
+                例如：
+                - "0 9 * * *" 表示每天早上9点
+                - "0 9 * * 1,3,5" 表示每周一三五早上9点
+        
+        Returns:
+            dict: 包含以下字段的字典：
+                - minute: 分钟 (0-59)
+                - hour: 小时 (0-23)
+                - day: 日期 (1-31)
+                - month: 月份 (1-12)
+                - day_of_week: 星期 (0-6 或 MON-SUN)
+        """
         logger.info(f"cron_expr={cron_expr}")
         fields = cron_expr.split(" ")
         return {
@@ -315,7 +405,29 @@ class WeatherPlugin(Star):
         }
 
     async def _subscribe_callback(self, unified_msg_origin: str, d: dict):
-        """The callback function of the subscribe."""
+        """
+        天气订阅的回调函数，在预定时间触发并推送天气信息
+        
+        Args:
+            unified_msg_origin (str): 消息来源的统一标识符，用于确定消息发送目标
+            d (dict): 订阅任务的详细信息，包含以下字段：
+                - text (str): 订阅描述文本
+                - city (str): 订阅的城市名称
+                - cron (str): cron表达式（用于重复性任务）
+                - cron_h (str): 人类可读的时间描述
+                - datetime (str, optional): 一次性任务的执行时间
+                - id (str): 任务的唯一标识符
+        
+        处理流程：
+        1. 获取指定城市的天气数据
+        2. 根据配置的send_mode决定使用文本还是图片方式
+        3. 如果是文本模式，使用LLM优化展示效果
+        4. 发送天气信息到指定目标
+        
+        注意：
+        - 如果获取天气数据失败，将记录错误但不重试
+        - 图片模式目前标记为TODO状态
+        """
         import datetime
         
         logger.info("🔔 订阅回调函数被触发！")
@@ -352,9 +464,24 @@ class WeatherPlugin(Star):
         except Exception as e:
             logger.error(f"订阅回调执行失败: {e}", exc_info=True)
     
-    @weather_subscribe_group.command("ls")
+    @weather_subscribe_group.command("ls", alias="列表")
     async def subscribe_list(self, event: AstrMessageEvent, city: Optional[str] = ""):
-        """List upcoming subscribe."""
+        """
+        列出当前所有有效的天气订阅
+        
+        Args:
+            event (AstrMessageEvent): 消息事件对象
+            city (Optional[str]): 城市名称过滤器（暂未实现）
+            
+        Returns:
+            生成器，产生以下消息：
+            - 如果没有订阅：提示没有正在进行的订阅事项
+            - 如果有订阅：显示所有订阅的列表，包含序号、描述和时间
+            
+        订阅列表格式：
+        1. 天气预报 - 每天9点(Cron: 0 9 * * *)
+        2. 天气预报 - 2024-03-20 08:00
+        """
         subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
         if not subscribe:
             yield event.plain_result("没有正在进行的订阅事项。")
@@ -369,9 +496,27 @@ class WeatherPlugin(Star):
             subscribe_str += "\n使用 /weather_subscribe rm <id> 删除订阅事项。\n"
             yield event.plain_result(subscribe_str)
 
-    @weather_subscribe_group.command("rm")
+    @weather_subscribe_group.command("rm", alias="删除")
     async def subscribe_rm(self, event: AstrMessageEvent, index: int):
-        """Remove a subscribe by index."""
+        """
+        删除指定序号的天气订阅
+        
+        Args:
+            event (AstrMessageEvent): 消息事件对象
+            index (int): 要删除的订阅序号（从1开始）
+            
+        Returns:
+            生成器，产生以下消息之一：
+            - 如果没有订阅：提示没有待办事项
+            - 如果序号无效：提示索引越界
+            - 如果删除成功：显示成功删除的订阅内容
+            - 如果定时任务删除失败：提示可能需要重启来完全移除
+            
+        注意：
+        - 序号对应 ls 命令显示的订阅列表序号
+        - 删除后原序号之后的订阅序号会自动前移
+        - 删除操作会同时移除内存中的订阅数据和定时任务
+        """
         subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
 
         if not subscribe:
@@ -426,7 +571,14 @@ class WeatherPlugin(Star):
     # =============================
     async def get_future_weather_by_city(self, city: str) -> Optional[list]:
         """
-        调用高德开放平台API，返回城市当前实况
+        调用高德开放平台API，获取城市未来天气预报
+        
+        Args:
+            city (str): 城市名称或城市编码
+            
+        Returns:
+            Optional[list]: 天气预报数据列表，每个元素为一天的天气数据字典
+                          如果请求失败则返回 None
         """
         logger.debug(f"get_current_weather_by_city city={city}")
         url = "https://restapi.amap.com/v3/weather/weatherInfo"
