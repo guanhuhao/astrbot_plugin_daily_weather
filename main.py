@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import aiohttp
 import traceback
 import re
@@ -243,8 +244,6 @@ class WeatherPlugin(Star):
         /weather <子指令> <城市或其它参数>
         子指令包括：
         - current: 查看当前实况天气
-        - forecast: 查询未来4天天气预报
-        - help: 查看帮助信息
         """
         pass
 
@@ -252,16 +251,10 @@ class WeatherPlugin(Star):
     async def weather_current(self, event: AstrMessageEvent, city: Optional[str] = ""):
         """
         查看当前实况天气，支持文本和图片两种展示模式，并可通过LLM优化输出格式
-        用法: /weather current <城市>
         示例: /weather current 北京
         
         参数:
         - city: 城市名称，若不指定则使用默认城市
-        
-        输出:
-        - 取决于配置的send_mode:
-          - "image": 生成图片形式的天气信息
-          - "text": 生成文本形式的天气信息（通过LLM优化展示）
         """
         logger.info(f"User called /weather current with city={city}")
         if not city:
@@ -309,12 +302,6 @@ class WeatherPlugin(Star):
     async def weather_subscribe(self, event: AstrMessageEvent, description: str = ""):
         """
         订阅天气预报服务
-        
-        Args:
-            event (AstrMessageEvent): 消息事件对象
-            description (str): 订阅描述，包含城市和时间信息，将通过LLM解析
-                             为空时使用默认值：上海，每天9点
-        
         示例:
             - /weather_subscribe sub 每天早上8点发送杭州天气
             - /weather_subscribe sub 每周一三五上午9点发送北京天气
@@ -468,16 +455,6 @@ class WeatherPlugin(Star):
     async def subscribe_list(self, event: AstrMessageEvent, city: Optional[str] = ""):
         """
         列出当前所有有效的天气订阅
-        
-        Args:
-            event (AstrMessageEvent): 消息事件对象
-            city (Optional[str]): 城市名称过滤器（暂未实现）
-            
-        Returns:
-            生成器，产生以下消息：
-            - 如果没有订阅：提示没有正在进行的订阅事项
-            - 如果有订阅：显示所有订阅的列表，包含序号、描述和时间
-            
         订阅列表格式：
         1. 天气预报 - 每天9点(Cron: 0 9 * * *)
         2. 天气预报 - 2024-03-20 08:00
@@ -500,22 +477,9 @@ class WeatherPlugin(Star):
     async def subscribe_rm(self, event: AstrMessageEvent, index: int):
         """
         删除指定序号的天气订阅
-        
-        Args:
-            event (AstrMessageEvent): 消息事件对象
-            index (int): 要删除的订阅序号（从1开始）
-            
-        Returns:
-            生成器，产生以下消息之一：
-            - 如果没有订阅：提示没有待办事项
-            - 如果序号无效：提示索引越界
-            - 如果删除成功：显示成功删除的订阅内容
-            - 如果定时任务删除失败：提示可能需要重启来完全移除
-            
         注意：
         - 序号对应 ls 命令显示的订阅列表序号
         - 删除后原序号之后的订阅序号会自动前移
-        - 删除操作会同时移除内存中的订阅数据和定时任务
         """
         subscribe = await self.get_upcoming_subscribe(event.unified_msg_origin)
 
